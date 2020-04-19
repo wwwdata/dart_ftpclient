@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart';
@@ -12,9 +13,10 @@ class FileUpload {
   final FTPSocket _socket;
   final TransferMode _mode;
   final DebugLog _log;
+  final Function(double) _uploadProgress;
 
   /// File Upload Command
-  FileUpload(this._socket, this._mode, this._log);
+  FileUpload(this._socket, this._mode, this._log, [this._uploadProgress]);
 
   /// Upload File [fFile] to the current directory with [sRemoteName] (using filename if not set)
   Future<void> uploadFile(File fFile, [String sRemoteName = '']) async {
@@ -42,13 +44,31 @@ class FileUpload {
 
     // Data Transfer Socket
     final readStream = fFile.openRead();
+    final totalLength = await fFile.length();
+
+    var byteCount = 0;
+    final Stream<List<int>> monitoredStream = readStream.transform(
+      StreamTransformer.fromHandlers(
+        handleData: (data, sink) {
+          byteCount += data.length;
+          final percentage = (byteCount / totalLength);
+          _uploadProgress?.call(percentage);
+          sink.add(data);
+        },
+        handleError: (error, stack, sink) {},
+        handleDone: (sink) {
+          sink.close();
+        },
+      ),
+    );
+
     _log.log('Opening DataSocket to Port $iPort');
     final dataSocket = await Socket.connect(_socket.host, iPort);
 
     final acceptResponse = _socket.readResponse();
     _log.log('response $acceptResponse');
 
-    await dataSocket.addStream(readStream);
+    await dataSocket.addStream(monitoredStream);
     await dataSocket.flush();
     await dataSocket.close();
 
